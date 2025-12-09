@@ -1,0 +1,137 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Accident Monitor — Live Dashboard</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body{font-family:Arial,Helvetica,sans-serif; margin:0}
+    #topbar{background:#0b5ed7;color:#fff;padding:12px 16px}
+    #main{display:flex;flex-direction:row;height:calc(100vh - 56px)}
+    #map{flex:2;min-width:300px}
+    #panel{flex:1;padding:12px;box-shadow:-2px 0 8px rgba(0,0,0,0.1);overflow:auto}
+    .card{border:1px solid #eee;padding:10px;margin-bottom:10px;border-radius:6px}
+    .alert-banner{background:#ff4d4f;color:#fff;padding:10px;border-radius:6px;margin-bottom:10px}
+    .small{font-size:13px;color:#555}
+  </style>
+
+  <!-- Firebase (v8 CDN for simplicity) -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+  <!-- Google Maps -->
+  <script async defer src="https://maps.googleapis.com/maps/api/js?key=API_KEY"></script>
+</head>
+<body>
+  <div id="topbar"><strong>Accident Monitor</strong> — Live Updates</div>
+  <div id="main">
+    <div id="map"></div>
+    <div id="panel">
+      <div id="banner" class="card">
+        <div id="bannerContent"><em>No active accidents</em></div>
+      </div>
+      <div class="card">
+        <h3>Latest Accidents</h3>
+        <div id="list"></div>
+      </div>
+      <div class="card">
+        <h3>Quick Actions</h3>
+        <p class="small">Click the call icon in any event to call emergency numbers (device must support calls).</p>
+      </div>
+    </div>
+  </div>
+
+<script>
+  // ------- CONFIG (REPLACE THESE) -------
+  var firebaseConfig = {
+    apiKey: "AIzaSyC2Q3vLbwp7xM-FRhDXUxFrkVMDEzQtLfY",
+    authDomain: "car-accident-detection-s-5b09c.firebaseapp.com",
+    databaseURL: "https://console.firebase.google.com/project/car-accident-detection-s-5b09c/overview?fb_gclid=Cj0KCQiAi9rJBhCYARIsALyPDtul1C9nX0OhFz4Acvbh7xpgd8Ie2vSHael3HiHKCJZMFwEpyweBJrcaArGAEALw_wcB.firebaseio.com",
+    projectId: "car-accident-detection-s-5b09c",
+    storageBucket: "car-accident-detection-s-5b09c.firebasestorage.app",
+    messagingSenderId:  "26502814894",
+    appId: "1:26502814894:web:ce9c12c22f737b0648213f"
+  };
+  // Google Maps API key must be enabled in script tag. Replace above 'GOOGLE_MAPS_API_KEY'
+  // ---------------------------------------
+
+  firebase.initializeApp(firebaseConfig);
+  var db = firebase.database();
+
+  // Map init
+  var map;
+  var markers = {};
+  function initMap() {
+    map = new google.maps.Map(document.getElementById('map'), {
+      center: {lat: 20.5937, lng: 78.9629}, // India center
+      zoom: 5
+    });
+  }
+  window.initMap = initMap; // in case async load needs it
+
+  // Helper: add marker
+  function addMarker(key, lat, lon, title) {
+    var pos = {lat: parseFloat(lat), lng: parseFloat(lon)};
+    if(markers[key]) {
+      markers[key].setPosition(pos);
+    } else {
+      var m = new google.maps.Marker({
+        position: pos,
+        map: map,
+        title: title
+      });
+      markers[key] = m;
+    }
+  }
+
+  // Listen for new accidents
+  var accRef = db.ref('accidents');
+  accRef.limitToLast(50).on('child_added', function(snap){
+    var data = snap.val();
+    renderEvent(snap.key, data);
+  });
+  accRef.limitToLast(50).on('child_changed', function(snap){
+    renderEvent(snap.key, snap.val());
+  });
+
+  function renderEvent(key, data) {
+    // banner
+    var banner = document.getElementById('bannerContent');
+    var lat = data.lat || "NA";
+    var lon = data.lon || "NA";
+    banner.innerHTML = '<div class="alert-banner"><strong>ACCIDENT:</strong> ' + (data.vehicle_id||'Unknown') +
+      '<br/><span class="small">Impact: ' + (data.impact_level||'NA') + ' • Speed: ' + (data.speed||'NA') + ' km/h</span>' +
+      '<br/><span class="small">Time: ' + (data.time||new Date().toLocaleString()) + '</span>' +
+      '<br/><a target="_blank" href="https://www.google.com/maps/search/?api=1&query=' + lat + ',' + lon + '">Open in Google Maps</a>' +
+      ' <a href="tel:8319508484" style="margin-left:10px">📞 Call</a></div>';
+
+    // list entry
+    var list = document.getElementById('list');
+    var el = document.getElementById('ev_' + key);
+    var itemHtml = '<div class="card" id="ev_' + key + '"><strong>' + (data.vehicle_id||'Vehicle') +
+      '</strong><div class="small">Impact: ' + (data.impact_level||'NA') + ' • Speed: ' + (data.speed||'NA') + ' km/h</div>' +
+      '<div class="small">Time: ' + (data.time||'') + '</div>' +
+      '<div class="small">Loc: ' + lat + ', ' + lon + '</div>' +
+      '<div style="margin-top:6px"><a target="_blank" href="https://www.google.com/maps/search/?api=1&query=' + lat + ',' + lon + '">Map</a> ' +
+      '<a href="tel:8319508484" style="margin-left:10px">📞 Call</a></div></div>';
+
+    if(!el) list.insertAdjacentHTML('afterbegin', itemHtml);
+    else el.outerHTML = itemHtml;
+
+    // add marker
+    if(lat !== "NA" && lon !== "NA") {
+      addMarker(key, lat, lon, data.vehicle_id || 'Accident');
+      // center map on latest event
+      map.setZoom(14);
+      map.panTo({lat: parseFloat(lat), lng: parseFloat(lon)});
+    }
+  }
+
+  // init google map after slight delay since maps script loads async
+  setTimeout(function(){
+    if(typeof google !== 'undefined' && google.maps) initMap();
+    else console.warn('Google Maps not ready - check API key.');
+  }, 1000);
+
+</script>
+</body>
+</html>
